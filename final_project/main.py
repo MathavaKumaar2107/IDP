@@ -10,9 +10,17 @@ from datetime import datetime
 # SETTINGS
 # =====================================================
 
-ABSENCE_TIME = 5
-
+SESSION_TIME = 20       # 20 seconds for testing
+LEFT_TIME = 5           # 5 seconds not seen = left
 FACE_TOLERANCE = 0.50
+
+
+# =====================================================
+# FOLDERS
+# =====================================================
+
+FACULTY_FOLDER = "faculty"
+STUDENT_FOLDER = "students"
 
 
 # =====================================================
@@ -22,28 +30,26 @@ FACE_TOLERANCE = 0.50
 faculty_encodings = []
 faculty_names = []
 
-for filename in os.listdir("faculty"):
+if not os.path.exists(FACULTY_FOLDER):
+    print("ERROR: faculty folder not found.")
+    exit()
 
-    if filename.lower().endswith(
-        (".jpg", ".jpeg", ".png")
-    ):
+for filename in os.listdir(FACULTY_FOLDER):
+
+    if filename.lower().endswith((".jpg", ".jpeg", ".png")):
 
         path = os.path.join(
-            "faculty",
+            FACULTY_FOLDER,
             filename
         )
 
         image = face_recognition.load_image_file(path)
 
-        encodings = face_recognition.face_encodings(
-            image
-        )
+        encodings = face_recognition.face_encodings(image)
 
         if len(encodings) == 1:
 
-            faculty_encodings.append(
-                encodings[0]
-            )
+            faculty_encodings.append(encodings[0])
 
             faculty_names.append(
                 os.path.splitext(filename)[0]
@@ -57,28 +63,26 @@ for filename in os.listdir("faculty"):
 student_encodings = []
 student_registers = []
 
-for filename in os.listdir("students"):
+if not os.path.exists(STUDENT_FOLDER):
+    print("ERROR: students folder not found.")
+    exit()
 
-    if filename.lower().endswith(
-        (".jpg", ".jpeg", ".png")
-    ):
+for filename in os.listdir(STUDENT_FOLDER):
+
+    if filename.lower().endswith((".jpg", ".jpeg", ".png")):
 
         path = os.path.join(
-            "students",
+            STUDENT_FOLDER,
             filename
         )
 
         image = face_recognition.load_image_file(path)
 
-        encodings = face_recognition.face_encodings(
-            image
-        )
+        encodings = face_recognition.face_encodings(image)
 
         if len(encodings) == 1:
 
-            student_encodings.append(
-                encodings[0]
-            )
+            student_encodings.append(encodings[0])
 
             student_registers.append(
                 os.path.splitext(filename)[0]
@@ -86,7 +90,7 @@ for filename in os.listdir("students"):
 
 
 # =====================================================
-# CHECK DATA
+# DISPLAY LOADED DATA
 # =====================================================
 
 print()
@@ -116,7 +120,7 @@ if len(student_encodings) == 0:
 
 
 # =====================================================
-# STUDENT STATUS
+# STUDENT INFORMATION
 # =====================================================
 
 student_status = {}
@@ -125,23 +129,28 @@ for register_no in student_registers:
 
     student_status[register_no] = {
 
-        "status": "NOT DETECTED",
+        # Did the student give biometric?
+        "biometric": False,
 
-        "first_seen": None,
+        # Current status
+        "status": "ABSENT",
 
+        # Last time CCTV saw student
         "last_seen": None
     }
 
 
 # =====================================================
-# SESSION
+# SESSION VARIABLES
 # =====================================================
 
 session_started = False
 
+session_start_time = None
+
 
 # =====================================================
-# CAMERA
+# OPEN WEBCAM
 # =====================================================
 
 camera = cv2.VideoCapture(0)
@@ -154,7 +163,7 @@ if not camera.isOpened():
 
 
 print("Waiting for faculty...")
-print("Show faculty face to start attendance.")
+print("Faculty must show face.")
 print("Press Q to quit.")
 print()
 
@@ -168,14 +177,18 @@ while True:
     ret, frame = camera.read()
 
     if not ret:
+
+        print("ERROR: Could not read camera.")
+
         break
 
-    # Mirror camera
+
+    # Mirror webcam
 
     frame = cv2.flip(frame, 1)
 
 
-    # Smaller frame for faster processing
+    # Resize for faster processing
 
     small_frame = cv2.resize(
         frame,
@@ -192,7 +205,7 @@ while True:
 
 
     # =================================================
-    # FACULTY VERIFICATION
+    # STEP 1: FACULTY VERIFICATION
     # =================================================
 
     if not session_started:
@@ -205,6 +218,7 @@ while True:
             rgb_small,
             locations
         )
+
 
         faculty_verified = False
 
@@ -226,44 +240,24 @@ while True:
 
                 session_started = True
 
+                session_start_time = time.time()
+
                 faculty_verified = True
+
 
                 print()
                 print("======================================")
                 print("FACULTY VERIFIED")
                 print("Faculty:", faculty_name)
                 print("ATTENDANCE SESSION STARTED")
+                print("SESSION TIME:", SESSION_TIME, "SECONDS")
                 print("======================================")
                 print()
 
                 break
 
 
-        # Screen message
-
-        if faculty_verified:
-
-            cv2.putText(
-                frame,
-                "FACULTY VERIFIED",
-                (30, 50),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                1,
-                (0, 255, 0),
-                2
-            )
-
-            cv2.putText(
-                frame,
-                "ATTENDANCE STARTED",
-                (30, 90),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.8,
-                (0, 255, 0),
-                2
-            )
-
-        else:
+        if not faculty_verified:
 
             cv2.putText(
                 frame,
@@ -276,14 +270,40 @@ while True:
             )
 
 
+        else:
+
+            cv2.putText(
+                frame,
+                "FACULTY VERIFIED",
+                (30, 50),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                1,
+                (0, 255, 0),
+                2
+            )
+
+
     # =================================================
-    # STUDENT ATTENDANCE
+    # STEP 2: ATTENDANCE SESSION
     # =================================================
 
     else:
 
         current_time = time.time()
 
+        elapsed_time = (
+            current_time - session_start_time
+        )
+
+        remaining_time = max(
+            0,
+            SESSION_TIME - elapsed_time
+        )
+
+
+        # =================================================
+        # FIND FACES
+        # =================================================
 
         locations = face_recognition.face_locations(
             rgb_small
@@ -295,19 +315,18 @@ while True:
         )
 
 
-        # Students detected in THIS frame
-
-        detected_students = set()
-
-
         # =================================================
-        # IDENTIFY EACH FACE
+        # PROCESS EACH FACE
         # =================================================
 
         for encoding, location in zip(
             encodings,
             locations
         ):
+
+            # ---------------------------------------------
+            # COMPARE WITH STUDENTS
+            # ---------------------------------------------
 
             matches = face_recognition.compare_faces(
                 student_encodings,
@@ -325,22 +344,18 @@ while True:
 
                 register_no = student_registers[index]
 
-                detected_students.add(
+
+                # =================================================
+                # STUDENT BIOMETRIC VERIFICATION
+                # =================================================
+
+                if not student_status[
                     register_no
-                )
-
-
-                # -----------------------------------------
-                # FIRST DETECTION
-                # -----------------------------------------
-
-                if student_status[
-                    register_no
-                ]["first_seen"] is None:
+                ]["biometric"]:
 
                     student_status[
                         register_no
-                    ]["first_seen"] = current_time
+                    ]["biometric"] = True
 
                     student_status[
                         register_no
@@ -348,32 +363,44 @@ while True:
 
                     print(
                         register_no,
-                        "-> PRESENT"
+                        "-> BIOMETRIC VERIFIED -> PRESENT"
                     )
 
 
-                # -----------------------------------------
-                # UPDATE LAST SEEN
-                # -----------------------------------------
+                # =================================================
+                # CCTV SEES VERIFIED STUDENT
+                # =================================================
 
                 student_status[
                     register_no
                 ]["last_seen"] = current_time
 
-                student_status[
+
+                # If student had left and came back
+
+                if student_status[
                     register_no
-                ]["status"] = "PRESENT"
+                ]["status"] == "LEFT THE CLASS":
+
+                    student_status[
+                        register_no
+                    ]["status"] = "PRESENT"
+
+                    print(
+                        register_no,
+                        "-> RETURNED TO CLASS"
+                    )
 
 
             # =================================================
-            # FACE COORDINATES
+            # FACE BOX
             # =================================================
 
             top, right, bottom, left = location
 
 
-            # Convert small-frame coordinates
-            # back to original frame
+            # Convert coordinates back
+            # to original frame size
 
             top *= 4
             right *= 4
@@ -382,7 +409,7 @@ while True:
 
 
             # =================================================
-            # DRAW BOX
+            # BOX COLOR
             # =================================================
 
             if register_no == "UNKNOWN":
@@ -393,6 +420,10 @@ while True:
 
                 box_color = (0, 255, 0)
 
+
+            # =================================================
+            # DRAW BOX
+            # =================================================
 
             cv2.rectangle(
                 frame,
@@ -419,60 +450,88 @@ while True:
 
 
         # =================================================
-        # CHECK 5 SECOND ABSENCE
+        # CHECK STUDENT STATUS
         # =================================================
 
         for register_no in student_registers:
 
-            last_seen = student_status[
+            student = student_status[
                 register_no
-            ]["last_seen"]
+            ]
 
 
-            # -----------------------------------------
-            # NEVER SEEN
-            # -----------------------------------------
+            # =================================================
+            # NEVER GAVE BIOMETRIC
+            # =================================================
 
-            if last_seen is None:
+            if not student["biometric"]:
 
-                student_status[
-                    register_no
-                ]["status"] = "ABSENT"
+                student["status"] = "ABSENT"
+
+                continue
 
 
-            # -----------------------------------------
-            # PREVIOUSLY SEEN
-            # -----------------------------------------
+            # =================================================
+            # BIOMETRIC GIVEN
+            # =================================================
 
-            else:
+            last_seen = student["last_seen"]
 
-                time_missing = (
+
+            if last_seen is not None:
+
+                missing_time = (
                     current_time - last_seen
                 )
 
 
-                if time_missing >= ABSENCE_TIME:
+                # =================================================
+                # LEFT CLASS
+                # =================================================
 
-                    if student_status[
-                        register_no
-                    ]["status"] == "PRESENT":
+                if missing_time >= LEFT_TIME:
+
+                    if student["status"] == "PRESENT":
+
+                        student["status"] = "LEFT THE CLASS"
 
                         print(
                             register_no,
-                            "-> ABSENT / LEFT CLASS"
+                            "-> LEFT THE CLASS"
                         )
 
 
-                    student_status[
-                        register_no
-                    ]["status"] = "ABSENT"
+        # =================================================
+        # TIMER
+        # =================================================
+
+        cv2.putText(
+            frame,
+            "ATTENDANCE ACTIVE",
+            (30, 45),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.9,
+            (0, 255, 0),
+            2
+        )
+
+
+        cv2.putText(
+            frame,
+            f"TIME LEFT: {int(remaining_time)}s",
+            (30, 80),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.8,
+            (0, 255, 255),
+            2
+        )
 
 
         # =================================================
         # DISPLAY STUDENT STATUS
         # =================================================
 
-        y = 180
+        y = 125
 
 
         for register_no in student_registers:
@@ -491,6 +550,10 @@ while True:
 
                 text_color = (0, 255, 0)
 
+            elif status == "LEFT THE CLASS":
+
+                text_color = (0, 165, 255)
+
             else:
 
                 text_color = (0, 0, 255)
@@ -501,7 +564,7 @@ while True:
                 text,
                 (30, y),
                 cv2.FONT_HERSHEY_SIMPLEX,
-                0.65,
+                0.6,
                 text_color,
                 2
             )
@@ -511,41 +574,17 @@ while True:
 
 
         # =================================================
-        # ATTENDANCE COUNT
+        # END SESSION
         # =================================================
 
-        present_count = 0
+        if elapsed_time >= SESSION_TIME:
 
+            print()
+            print("======================================")
+            print("ATTENDANCE SESSION ENDED")
+            print("======================================")
 
-        for register_no in student_registers:
-
-            if student_status[
-                register_no
-            ]["status"] == "PRESENT":
-
-                present_count += 1
-
-
-        cv2.putText(
-            frame,
-            f"PRESENT: {present_count}/{len(student_registers)}",
-            (30, 145),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.8,
-            (0, 255, 0),
-            2
-        )
-
-
-        cv2.putText(
-            frame,
-            "ATTENDANCE ACTIVE",
-            (30, 50),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            1,
-            (0, 255, 0),
-            2
-        )
+            break
 
 
     # =================================================
@@ -563,6 +602,8 @@ while True:
     # =================================================
 
     if cv2.waitKey(1) & 0xFF == ord("q"):
+
+        print("Program stopped by user.")
 
         break
 
@@ -591,6 +632,7 @@ with open(
 
     writer.writerow([
         "register_no",
+        "biometric",
         "status",
         "time"
     ])
@@ -598,13 +640,20 @@ with open(
 
     for register_no in student_registers:
 
+        student = student_status[
+            register_no
+        ]
+
+
         writer.writerow([
 
             register_no,
 
-            student_status[
-                register_no
-            ]["status"],
+            "YES"
+            if student["biometric"]
+            else "NO",
+
+            student["status"],
 
             datetime.now().strftime(
                 "%Y-%m-%d %H:%M:%S"
@@ -613,7 +662,7 @@ with open(
 
 
 # =====================================================
-# FINAL OUTPUT
+# FINAL RESULT
 # =====================================================
 
 print()
@@ -624,14 +673,18 @@ print("======================================")
 
 for register_no in student_registers:
 
+    student = student_status[
+        register_no
+    ]
+
+
     print(
         register_no,
         "->",
-        student_status[
-            register_no
-        ]["status"]
+        student["status"]
     )
 
 
 print()
 print("Attendance saved to attendance.csv")
+print("======================================")
